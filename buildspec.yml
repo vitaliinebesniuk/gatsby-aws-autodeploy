@@ -1,0 +1,17 @@
+version: 0.1
+
+environment_variables:
+  plaintext:
+    HUGO_VERSION: "0.41"
+    
+phases:
+  install:
+    commands:                                                                 
+      - npm install
+  build:
+    commands:
+      - npm run build
+  post_build:
+    commands:
+      - aws s3 sync public/ s3://contentful.mort-vivant.me/ --region us-east-1 --delete
+      - echo Build completed on `date`
