@@ -1,69 +1,93 @@
-# gatsby-contentful-starter
+## Hosting WebApp in S3:
 
-Gatsby [Contentful](https://www.contentful.com) starter for creating a blog
-
-![The index page of the starter blog](https://rawgit.com/contentful-userland/gatsby-contentful-starter/master/screenshot.jpg "The index page of the starter blog")
-
-Static sites are scalable, secure and have very little required maintenance. They come with a drawback though. Not everybody feels good editing files, building a project and uploading it somewhere. This is where Contentful comes into play.
-
-With Contentful and Gatsby you can connect your favorite static site generator with an API that provides an easy to use interface for people writing content and automate the publishing using services like [Travis CI](https://travis-ci.org/) or [Netlify](https://www.netlify.com/).
-
-## Contribution
-
-This project is part of [contentful-userland](https://github.com/contentful-userland) which means that we’re always open to contributions and pull requests. You can learn more about how contentful userland is organized by visiting [our about repository](https://github.com/contentful-userland/about).
-
-## Requirements
-
-To use this project you have to have a Contentful account. If you don't have one yet you can register at [www.contentful.com/sign-up](https://www.contentful.com/sign-up/).
-
-## Getting started
-
-### Get the source code and install dependencies.
-
-```
-$ git clone git@github.com:contentful-userland/gatsby-contentful-starter.git
-$ npm i
+Create an S3 Bucket and enter the bucket name and select a region. Enable static website hosting and add permissions in Bucket policy:
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": [
+                "s3:GetObject",
+                "s3:List*",
+                "s3:Put*",
+                "s3:DeleteObject"
+            ],
+            "Resource": [
+                "arn:aws:s3:::contentful.mort-vivant.me",
+                "arn:aws:s3:::contentful.mort-vivant.me/*"
+            ]
+        }
+    ]
+}
 ```
 
-Or use the [Gatsby CLI](https://www.npmjs.com/package/gatsby-cli).
+## Build Gatsby Website Automatically Using AWS CodeBuild
+The first thing that we need is a set of instructions for building the Gatsby site. Since the build server starts clean every time this includes downloading Gatsby and all the dependencies that we require. One of the o ptions that CodeBuild has for specifying the build instruction is the `buildspec.yaml` file.
+Navigate to the CodeBuild console and create a new project using the following settings:
+-   **Project name:**  `gatsby-contentful`
+-   **Source provider:** `GitHub`
+-   **Repository:** `Use a repository in my account`
+-   **Choose a repository:** `Choose your GitHub repository`
+-   **Environment image:**  `Use an image managed by AWS CodeBuild`
+-   **Operating System:** `Ubuntu` 
+-   **Runtime:** `Node.js`
+-   **Runtime version:** `aws/codebuild/nodejs:8.11.0`
+-   **Buildspec name:** `buildspec.yml`
+-   **Artifact type:**  `No artifact`
+-   **Service role:**  `Create a service role in your account`
+***Show advanced settings***
+- **Environment variables** Add environment variables that are called `CONTENTFUL_SPACE_ID` and `CONTENTFUL_ACCESS_TOKEN` from Contenful
 
+## Using AWS CodePipeline to rebuild every time a code change is pushed to repository
+Go to the AWS Management Console and open the AWS CodePipeline console 
+then choose **Create pipeline**.
+In **Step 1: Name**, in **Pipeline name**, type name of Pipeline
+In **Step 2: Source**, in **Source provider**, choose **GitHub**, and click **Connect to GitHub** button. Choose a repository from the list of repositories, and then select the branch you want to use.
+In **Step 3: Build**,  in **Build provider**, choose **AWS CodeBuild**. In **Project name**, choose the project name from the list.
+In **Step 4: Deploy**,   choose **No Deployment**.
+In  **Step 5: Service Role**, choose  **Create role**.
+On the IAM console page that describes the AWS-CodePipeline-Service role to be created for you, choose  **Allow**.
+In **Step 6: Review**, review the information, and then choose **Create pipeline**.
+
+The pipeline automatically starts to run. You can view progress and success and failure messages.
+
+## Create Lambda function
+Click **Create function** and in **Author from scratch**, do the following:
+-   In  **Name***, specify your Lambda function name.
+-   In  **Runtime***, choose  `Python 3.6`.
+-   In  **Role***, choose  **Create a custom role** 
+-   In  **Existing role***, choose created role.
+- Choose **Create Function.**
+
+Paste following code in the**Function code** section to build CodeBuild project
+```python
+import boto3, json
+
+def lambda_handler(event, context):
+    
+    client = boto3.client('codebuild')
+    
+    response = client.start_build(
+        projectName='gatsby-contentful'
+    )
+    return "Build triggered"
+    
+    print(response)
 ```
-$ gatsby new contentful-starter https://github.com/contentful-userland/gatsby-contentful-starter
-```
+Save function  and click **Test** to run function. This will run building the CodeBuild project
 
-### Set up of the needed content model and create a configuration file
+## API gateway
+To run an  automatic project rebuild, after changes on Contentful, need to create Invoke URL on  API Gateway.
+Create new API and create POST method on the `/` resource. 
+In the **Deploy API** dialog, create  `[New Stage]` and then choose **Deploy**.
+Once deployed, you can obtain the invocation URLs (**Invoke URL**) of the API's endpoints.
+In the **API Keys** section create new API key. Then go to      POST Method Request and change **API Key Required** to `true`
+ 
+## Creating IAM user
+For building project, deploy to S3  and enable CloudFront Invalidation we need to create an individual  IAM user. Add IAM user and attach **AmazonS3FullAccess** policy.
+Also, you need to add a policy for the IAM user, which will be called *CodeBuildBasePolicy-**[codebuild-project-name]**-**[aws-region-name]***
+and *AWSLambdaBasicExecutionRole* created in Lmbda
 
-This project comes with a Contentful setup command `npm run setup`.
-
-![Command line dialog of the npm run setup command](https://rawgit.com/contentful-userland/gatsby-contentful-starter/master/setup.jpg "Command line dialog of the npm run setup command")
-
-This command will ask you for a space ID, and access tokens for the Contentful Management, Preview and Delivery API and then import the needed content model into the space you define and write a config file (`./contentful.json`).
-
-`npm run setup` automates that for you but if you want to do it yourself rename `.contentful.json.sample` to `.contentful.json` and add your configuration in this file.
-
-## Crucial Commands
-
-This project comes with a few handy commands for linting and code fixing. The most important ones are the ones to develop and ship code. You can find the most important commands below.
-
-### `npm run dev`
-
-Run in the project locally using the [Contentful Preview API](https://www.contentful.com/developers/docs/references/content-preview-api/). This can perfect to preview changes before they go into production.
-
-### `npm run build`
-
-Run a production build into `./public`. The result is ready to be put on any static hosting you prefer.
-
-### `npm run deploy`
-
-Run a production build into `./public` and publish the site to GitHub pages.
-
-## Roadmap
-
-- [ ] [make the starter completely responsive](https://github.com/contentful-userland/gatsby-contentful-starter/issues/2)
-- [ ] [include tags](https://github.com/contentful-userland/gatsby-contentful-starter/issues/3)
-- [ ] [support traced placeholders](https://github.com/contentful-userland/gatsby-contentful-starter/issues/4)
-- [ ] [add i18n](https://github.com/contentful-userland/gatsby-contentful-starter/issues/6)
-
-## Other resources
-
-- Tutorial video series ["Building a blazing fast website with GatsbyJS and Contentful"](https://www.youtube.com/watch?v=Ek4o40w1tH4&list=PL8KiuH6vpACV-F7jXribe4YveGBhBeG9A) by @Khaledgarbaya
+Now whenever you make a change in the Github repository or Contentful your website will be updated.
